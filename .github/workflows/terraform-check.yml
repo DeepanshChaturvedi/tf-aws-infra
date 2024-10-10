@@ -16,14 +16,13 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
-    # - name: Setup Terraform
-    #   uses: hashicorp/setup-terraform@v2
-    #   with:
-    #     terraform_wrapper: false
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_wrapper: false
 
-    # - name: Run terraform fmt
-    #   run: terraform fmt -recursive -check
-    #   continue-on-error: false
+    - name: Run terraform fmt
+      run: terraform fmt -recursive -check
 
-    # - name: Run terraform validate
-    #   run: terraform validate
+    - name: Run terraform validate
+      run: terraform validate
