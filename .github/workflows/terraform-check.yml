@@ -1,0 +1,29 @@
+name: Terraform Format and Validate
+
+on:
+  pull_request:
+    branches:
+      - '*'  # Adjust the branch name if your default branch is different
+  push:
+    branches:
+      - '*'
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    # - name: Setup Terraform
+    #   uses: hashicorp/setup-terraform@v2
+    #   with:
+    #     terraform_wrapper: false
+
+    # - name: Run terraform fmt
+    #   run: terraform fmt -recursive -check
+    #   continue-on-error: false
+
+    # - name: Run terraform validate
+    #   run: terraform validate
