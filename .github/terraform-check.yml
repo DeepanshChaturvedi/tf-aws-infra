@@ -3,7 +3,7 @@ name: Terraform Format and Validate
 on:
   pull_request:
     branches:
-      - main  # Adjust the branch name if your default branch is different
+      - '*'  # Adjust the branch name if your default branch is different
   push:
     branches:
       - '*'
