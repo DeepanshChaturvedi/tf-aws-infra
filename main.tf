@@ -15,8 +15,8 @@ locals {
 
 # Loop to create multiple VPCs, with unique identifiers for each instance
 module "vpcs" {
-  source     = "./vpc_module"
-  for_each   = var.vpcs
+  source   = "./vpc_module"
+  for_each = var.vpcs
 
   region         = var.default_region
   vpc_cidr       = each.value.vpc_cidr
