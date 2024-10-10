@@ -1,38 +1,25 @@
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~>4.16"
-    }
-  }
-  required_version = ">=1.2.0"
-}
-
-data "aws_caller_identity" "current" {}
-
-output "account_id" {
-  value = "${data.aws_caller_identity.current.account_id}"
-}
-
-output "caller_arn" {
-  value = "${data.aws_caller_identity.current.arn}"
-}
-
-output "caller_user" {
-  value = "${data.aws_caller_identity.current.user_id}"
-}
-
-
 provider "aws" {
-  region = "us-east-1"
-  //profile = "dev"
+  region  = var.default_region
+  profile = var.profile
 }
 
-resource "aws_instance" "app_server" {
-  ami           = "ami-0b0ea68c435eb488d"
-  instance_type = "t2.micro"
+# Fetch up to 3 availability zones for each VPC, or use all if fewer than 3 exist.
+data "aws_availability_zones" "available" {
+  state = "available"
+}
 
-  tags = {
-    Name = "ExampleAppServerInstance"
-  }
+locals {
+  # Select up to 3 availability zones, converting to a list for compatibility
+  selected_zones = slice(sort(data.aws_availability_zones.available.names), 0, min(3, length(data.aws_availability_zones.available.names)))
+}
+
+# Loop to create multiple VPCs, with unique identifiers for each instance
+module "vpcs" {
+  source     = "./vpc_module"
+  for_each   = var.vpcs
+
+  region         = var.default_region
+  vpc_cidr       = each.value.vpc_cidr
+  name_prefix    = each.value.name_prefix
+  selected_zones = local.selected_zones
 }
