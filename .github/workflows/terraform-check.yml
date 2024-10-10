@@ -21,6 +21,9 @@ jobs:
       with:
         terraform_wrapper: false
 
+    - name: Run terraform init
+      run: terraform init
+
     - name: Run terraform fmt
       run: terraform fmt -recursive -check
 
