@@ -24,7 +24,7 @@ variable "ami_id" {
 variable "application_port" {
   description = "The port on which the application runs"
   type        = number
-  default     = 8000  # Default is set to 8080; change as necessary
+  default     = 8000 # Default is set to 8080; change as necessary
 }
 
 variable "vpc_cidr" {
