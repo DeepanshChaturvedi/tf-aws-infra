@@ -4,9 +4,6 @@ on:
   pull_request:
     branches:
       - 'main'  # Adjust the branch name if your default branch is different
-  push:
-    branches:
-      - '*'
 
 jobs:
   terraform:
