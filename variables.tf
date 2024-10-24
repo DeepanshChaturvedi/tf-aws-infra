@@ -1,3 +1,5 @@
+# Variables File (variables.tf)
+
 variable "default_region" {
   description = "AWS region for primary provider"
   type        = string
@@ -8,14 +10,6 @@ variable "profile" {
   type        = string
 }
 
-# variable "vpcs" {
-#   description = "Map of VPC configurations for multi-VPC deployment"
-#   type = map(object({
-#     vpc_cidr    = string
-#     name_prefix = string
-#   }))
-# }
-
 variable "ami_id" {
   description = "The ID of the custom AMI to use for the EC2 instance"
   type        = string
@@ -24,25 +18,41 @@ variable "ami_id" {
 variable "application_port" {
   description = "The port on which the application runs"
   type        = number
-  default     = 8000 # Default is set to 8080; change as necessary
+  default     = 8000 # Update based on your app requirements
 }
 
-variable "vpc_cidr" {
-  description = "The CIDR block for the VPC"
-  type        = string
-  default     = "10.0.0.0/16"
+variable "vpcs" {
+  description = "Map of VPC configurations for multi-VPC deployment"
+  type = map(object({
+    vpc_cidr    = string
+    name_prefix = string
+  }))
 }
 
-# The CIDR block for the public subnet
-variable "subnet_cidr" {
-  description = "The CIDR block for the public subnet"
+variable "db_engine" {
+  description = "The database engine for RDS (mysql, postgres, or mariadb)"
   type        = string
-  default     = "10.0.1.0/24"
+  default     = "postgres"
 }
 
-# The AWS region for the deployment
-variable "region" {
-  description = "The AWS region for the deployment"
+variable "db_port" {
+  description = "The database port (default 3306 for MySQL/MariaDB, 5432 for PostgreSQL)"
+  type        = number
+  default     = 5432
+}
+
+variable "db_family" {
+  description = "The database parameter group family (e.g., postgres12, mysql8.0)"
   type        = string
-  default     = "us-east-1"
+  default     = "postgres12"
+}
+
+variable "db_password" {
+  description = "The password for the database master user"
+  type        = string
+}
+
+variable "target_aws_account_id" {
+  description = "The AWS account ID with which to share the AMI"
+  type        = string
 }
