@@ -299,12 +299,12 @@ resource "aws_iam_policy" "combined_policy" {
 
 resource "aws_cloudwatch_log_group" "webapp_info_log_group" {
   name              = "webapp-info-logs"
-  retention_in_days = 3  # Specify retention period as needed
+  retention_in_days = 3 # Specify retention period as needed
 }
 
 resource "aws_cloudwatch_log_group" "webapp_error_log_group" {
   name              = "webapp-error-logs"
-  retention_in_days = 3  # Specify retention period as needed
+  retention_in_days = 3 # Specify retention period as needed
 }
 
 
