@@ -56,3 +56,25 @@ variable "target_aws_account_id" {
   description = "The AWS account ID with which to share the AMI"
   type        = string
 }
+
+variable "route53_zone_id" {
+  description = "The Route53 Zone ID for DNS management"
+  type        = string
+}
+
+variable "domain" {
+  description = "The domain name to use for the application"
+  type        = string
+}
+
+variable "subdomain" {
+  description = "The subdomain prefix for the environment (e.g., dev, demo)"
+  type        = string
+  default     = "dev" # or "demo" depending on the environment
+}
+
+variable "app_port" {
+  description = "The port on which the application listens"
+  type        = number
+  default     = 8000 # update to the actual port number if different
+}
