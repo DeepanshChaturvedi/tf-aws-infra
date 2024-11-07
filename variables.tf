@@ -78,3 +78,9 @@ variable "app_port" {
   type        = number
   default     = 8000 # update to the actual port number if different
 }
+
+variable "key_name" {
+  description = "The name of the SSH key pair for accessing EC2 instances"
+  type        = string
+  default     = "my-key-pair" # Replace with the name of your key pair
+}

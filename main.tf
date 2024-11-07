@@ -85,25 +85,20 @@ resource "aws_route_table_association" "public_subnet_association" {
   route_table_id = aws_route_table.public_rt[each.value.vpc_key].id
 }
 
-# Security Groups
-resource "aws_security_group" "application_sg" {
+# Load Balancer Security Group
+resource "aws_security_group" "load_balancer_sg" {
   for_each    = var.vpcs
-  name        = "${each.value.name_prefix}-application-sg"
-  description = "Allow SSH, HTTP, HTTPS, and application-specific traffic"
+  name        = "${each.value.name_prefix}-load-balancer-sg"
+  description = "Security group for Load Balancer"
   vpc_id      = aws_vpc.vpc[each.key].id
 
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
   ingress {
     from_port   = 443
     to_port     = 443
@@ -111,138 +106,44 @@ resource "aws_security_group" "application_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ingress {
-    from_port   = 8125
-    to_port     = 8125
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = var.application_port
-    to_port     = var.application_port
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  tags = { Name = "${each.value.name_prefix}-application-sg" }
 }
 
-resource "aws_security_group" "db_sg" {
+# Application Security Group
+resource "aws_security_group" "application_sg" {
   for_each    = var.vpcs
-  name        = "${each.value.name_prefix}-database-sg"
-  description = "Allow database traffic from application security group"
+  name        = "${each.value.name_prefix}-application-sg"
+  description = "Allow traffic only from Load Balancer"
   vpc_id      = aws_vpc.vpc[each.key].id
 
   ingress {
-    from_port       = var.db_port
-    to_port         = var.db_port
+    from_port       = var.application_port
+    to_port         = var.application_port
     protocol        = "tcp"
-    security_groups = [aws_security_group.application_sg[each.key].id]
+    security_groups = [aws_security_group.load_balancer_sg[each.key].id]
   }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  tags = { Name = "${each.value.name_prefix}-database-sg" }
 }
 
-# RDS Parameter Group
-resource "aws_db_parameter_group" "db_param_group" {
-  name        = "custom-db-parameter-group"
-  family      = var.db_family
-  description = "Custom parameter group for the database engine"
-  parameter {
-    name         = "max_connections"
-    value        = "100"
-    apply_method = "pending-reboot"
-  }
-  parameter {
-    name         = "rds.force_ssl"
-    value        = "0"
-    apply_method = "pending-reboot"
-  }
-}
-
-# DB Subnet Group
-resource "aws_db_subnet_group" "private_db_subnet_group" {
-  for_each = var.vpcs
-  name     = "${each.value.name_prefix}-private-db-subnet-group"
-  subnet_ids = [
-    for key, subnet in aws_subnet.private_subnet :
-    subnet.id if startswith(key, each.key)
-  ]
-  tags = { Name = "${each.value.name_prefix}-private-db-subnet-group" }
-}
-
-# RDS Instance
-resource "aws_db_instance" "csye6225_rds" {
-  for_each               = var.vpcs
-  identifier             = "${each.value.name_prefix}-csye6225"
-  engine                 = var.db_engine
-  instance_class         = "db.t3.micro"
-  allocated_storage      = 20
-  username               = "csye6225"
-  password               = var.db_password
-  db_name                = "csye6225"
-  db_subnet_group_name   = aws_db_subnet_group.private_db_subnet_group[each.key].name
-  vpc_security_group_ids = [aws_security_group.db_sg[each.key].id]
-  multi_az               = false
-  publicly_accessible    = false
-  parameter_group_name   = aws_db_parameter_group.db_param_group.name
-  skip_final_snapshot    = true
-  tags                   = { Name = "${each.value.name_prefix}-csye6225-database" }
-}
-
-# IAM Role and Policy for EC2 to access S3
-resource "aws_iam_role" "ec2_s3_access_role" {
-  name = "ec2_s3_access_role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Action    = "sts:AssumeRole",
-      Effect    = "Allow",
-      Principal = { Service = "ec2.amazonaws.com" }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "s3_access_policy" {
-  name = "ec2_s3_access_policy"
-  role = aws_iam_role.ec2_s3_access_role.id
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Effect = "Allow",
-        Action = [
-          "s3:ListBucket",
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:DeleteObject"
-        ],
-        Resource = [
-          "${aws_s3_bucket.attachments_bucket.arn}",
-          "${aws_s3_bucket.attachments_bucket.arn}/*"
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_iam_instance_profile" "ec2_instance_profile" {
-  name = "ec2_instance_profile"
-  role = aws_iam_role.ec2_s3_access_role.name
-}
-
-# Define the IAM Role for EC2 with combined S3 and CloudWatch permissions
+# IAM Role for EC2 instances to access S3 and CloudWatch
 resource "aws_iam_role" "combined_ec2_role" {
   name = "combined_ec2_role"
 
@@ -256,7 +157,7 @@ resource "aws_iam_role" "combined_ec2_role" {
   })
 }
 
-# Define the combined IAM policy for S3 and CloudWatch permissions
+# IAM Policy with permissions for S3 and CloudWatch
 resource "aws_iam_policy" "combined_policy" {
   name        = "combined_policy_for_ec2"
   description = "Policy with permissions for S3 access and CloudWatch metrics/logs"
@@ -297,30 +198,19 @@ resource "aws_iam_policy" "combined_policy" {
   })
 }
 
-resource "aws_cloudwatch_log_group" "webapp_info_log_group" {
-  name              = "webapp-info-logs"
-  retention_in_days = 3 # Specify retention period as needed
-}
-
-resource "aws_cloudwatch_log_group" "webapp_error_log_group" {
-  name              = "webapp-error-logs"
-  retention_in_days = 3 # Specify retention period as needed
-}
-
-
 # Attach the combined policy to the IAM role
 resource "aws_iam_role_policy_attachment" "combined_policy_attachment" {
   role       = aws_iam_role.combined_ec2_role.name
   policy_arn = aws_iam_policy.combined_policy.arn
 }
 
-# Create an instance profile and associate it with the combined IAM role
+# Create an instance profile to attach the IAM role to EC2 instances
 resource "aws_iam_instance_profile" "combined_instance_profile" {
   name = "combined_instance_profile"
   role = aws_iam_role.combined_ec2_role.name
 }
 
-# S3 Bucket
+# S3 Bucket for Attachments
 resource "random_uuid" "bucket_id" {}
 
 resource "aws_s3_bucket" "attachments_bucket" {
@@ -348,32 +238,164 @@ resource "aws_s3_bucket_lifecycle_configuration" "attachments_bucket_lifecycle" 
   }
 }
 
-resource "aws_route53_record" "app_a_record" {
-  for_each = aws_instance.web_app_instance
 
+# Database Security Group
+resource "aws_security_group" "db_sg" {
+  for_each    = var.vpcs
+  name        = "${each.value.name_prefix}-database-sg"
+  description = "Allow database traffic from application security group"
+  vpc_id      = aws_vpc.vpc[each.key].id # Ensure it matches the VPC for this RDS instance
+
+  ingress {
+    from_port       = var.db_port
+    to_port         = var.db_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.application_sg[each.key].id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# RDS Parameter Group
+resource "aws_db_parameter_group" "db_param_group" {
+  name        = "custom-db-parameter-group"
+  family      = var.db_family
+  description = "Custom parameter group for the database engine"
+  parameter {
+    name         = "max_connections"
+    value        = "100"
+    apply_method = "pending-reboot"
+  }
+  parameter {
+    name         = "rds.force_ssl"
+    value        = "0"
+    apply_method = "pending-reboot"
+  }
+}
+
+
+# DB Subnet Group
+resource "aws_db_subnet_group" "private_db_subnet_group" {
+  for_each = var.vpcs
+  name     = "${each.value.name_prefix}-private-db-subnet-group"
+  subnet_ids = [
+    for key, subnet in aws_subnet.private_subnet :
+    subnet.id if startswith(key, each.key)
+  ]
+  tags = { Name = "${each.value.name_prefix}-private-db-subnet-group" }
+}
+
+# RDS Instance
+resource "aws_db_instance" "csye6225_rds" {
+  for_each               = var.vpcs
+  identifier             = "${each.value.name_prefix}-csye6225"
+  engine                 = var.db_engine
+  instance_class         = "db.t3.micro"
+  allocated_storage      = 20
+  username               = "csye6225"
+  password               = var.db_password
+  db_name                = "csye6225"
+  db_subnet_group_name   = aws_db_subnet_group.private_db_subnet_group[each.key].name
+  vpc_security_group_ids = [aws_security_group.db_sg[each.key].id]
+  multi_az               = false
+  publicly_accessible    = false
+  parameter_group_name   = aws_db_parameter_group.db_param_group.name
+  skip_final_snapshot    = true
+  tags                   = { Name = "${each.value.name_prefix}-csye6225-database" }
+}
+
+# Create Load Balancer
+resource "aws_lb" "app_lb" {
+  name               = "${var.profile}-app-lb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.load_balancer_sg["vpc1"].id] # Ensure to use the correct VPC key here
+  subnets            = [for subnet in aws_subnet.public_subnet : subnet.id]
+
+  enable_deletion_protection = false
+  tags = {
+    Name = "${var.profile}-app-lb"
+  }
+}
+
+
+resource "aws_lb_target_group" "app_target_group" {
+  for_each = var.vpcs
+  name     = "${var.profile}-app-tg"
+  port     = var.application_port
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.vpc[each.key].id # Replace "vpc1" with your actual key
+
+  health_check {
+    path                = "/healthz"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    matcher             = "200"
+  }
+
+  tags = {
+    Name = "${var.profile}-app-target-group"
+  }
+}
+
+resource "aws_autoscaling_attachment" "asg_attachment" {
+  for_each               = var.vpcs # Loop over each VPC to create an attachment per Auto Scaling Group
+  autoscaling_group_name = aws_autoscaling_group.web_app_asg[each.key].name
+  lb_target_group_arn    = aws_lb_target_group.app_target_group[each.key].arn
+}
+
+
+resource "aws_lb_listener" "app_listener" {
+  load_balancer_arn = aws_lb.app_lb.arn # Direct reference to the single load balancer
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_target_group["vpc1"].arn # Use a specific key for target group if necessary
+  }
+}
+
+
+
+resource "aws_route53_record" "app_a_record" {
   zone_id = var.route53_zone_id
   name    = "${var.subdomain}.${var.domain}"
   type    = "A"
-  ttl     = 300
-  records = [each.value.public_ip] # Use each.value to access the IP
+
+  alias {
+    name                   = aws_lb.app_lb.dns_name # Point to the ALB's DNS name
+    zone_id                = aws_lb.app_lb.zone_id  # Use the ALB's hosted zone ID
+    evaluate_target_health = true
+  }
 }
 
-# EC2 Instance with S3 and RDS Environment Variables
-resource "aws_instance" "web_app_instance" {
-  for_each               = var.vpcs
-  ami                    = var.ami_id
-  instance_type          = "t2.micro"
-  vpc_security_group_ids = [aws_security_group.application_sg[each.key].id]
-  iam_instance_profile   = aws_iam_instance_profile.combined_instance_profile.name
 
-  subnet_id = element([
-    for key, subnet in aws_subnet.public_subnet :
-    subnet.id if startswith(key, each.key)
-  ], 0)
+# Launch Template for Auto Scaling Group
+resource "aws_launch_template" "web_app_launch_template" {
+  for_each      = var.vpcs
+  name_prefix   = "csye6225_asg"
+  image_id      = var.ami_id
+  instance_type = "t2.micro"
+  key_name      = var.key_name
 
-  associate_public_ip_address = true
+  network_interfaces {
+    associate_public_ip_address = true
+    security_groups             = [aws_security_group.application_sg[each.key].id]
+  }
 
-  user_data = <<-EOF
+  iam_instance_profile {
+    name = aws_iam_instance_profile.combined_instance_profile.name
+  }
+
+  user_data = base64encode(<<-EOF
 #!/bin/bash
 set -e
 exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
@@ -472,26 +494,112 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
 
 
 EOF
-
-  tags = { Name = "${each.value.name_prefix}-web-app-instance" }
+  )
 }
 
-output "vpc_ids" {
-  description = "VPC IDs"
-  value       = { for key, vpc in aws_vpc.vpc : key => vpc.id }
+
+
+# Auto Scaling Group
+resource "aws_autoscaling_group" "web_app_asg" {
+  for_each = var.vpcs
+  launch_template {
+    id      = aws_launch_template.web_app_launch_template[each.key].id
+    version = "$Latest"
+  }
+
+  min_size                  = 3                                                    # Minimum number of instances
+  max_size                  = 5                                                    # Maximum number of instances
+  desired_capacity          = 3                                                    # Initial number of instances to launch
+  vpc_zone_identifier       = [for subnet in aws_subnet.public_subnet : subnet.id] # Subnets where instances will be launched
+  health_check_type         = "EC2"
+  health_check_grace_period = 60 # Grace period for health checks
+  default_instance_warmup   = 8
+
+  # Tags applied to EC2 instances
+  tag {
+    key                 = "Name"
+    value               = "${each.value.name_prefix}-web-app-instance"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Environment"
+    value               = var.profile # Additional tag example
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "AutoScalingGroup"
+    value               = "${each.value.name_prefix}-asg"
+    propagate_at_launch = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
-output "public_subnet_ids" {
-  description = "Public Subnet IDs"
-  value       = { for key, subnets in aws_subnet.public_subnet : key => subnets.*.id }
+
+
+# Auto Scaling Policies
+# Scale Up Policy - Increases the instance count by 1
+resource "aws_autoscaling_policy" "scale_up" {
+  for_each               = var.vpcs
+  name                   = "${each.value.name_prefix}-scale-up-policy"
+  autoscaling_group_name = aws_autoscaling_group.web_app_asg[each.key].name
+  policy_type            = "SimpleScaling"
+  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = 1  # Increment by 1 instance
+  cooldown               = 60 # Cooldown period
 }
 
-output "private_subnet_ids" {
-  description = "Private Subnet IDs"
-  value       = { for key, subnets in aws_subnet.private_subnet : key => subnets.*.id }
+# Scale Down Policy - Decreases the instance count by 1
+resource "aws_autoscaling_policy" "scale_down" {
+  for_each               = var.vpcs
+  name                   = "${each.value.name_prefix}-scale-down-policy"
+  autoscaling_group_name = aws_autoscaling_group.web_app_asg[each.key].name
+  policy_type            = "SimpleScaling"
+  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = -1 # Decrement by 1 instance
+  cooldown               = 60 # Cooldown period
+
 }
 
-output "app_url" {
-  description = "URL of the application"
-  value       = "http://${var.subdomain}.${var.domain}:${var.app_port}"
+# CloudWatch Alarm for Scaling Up
+resource "aws_cloudwatch_metric_alarm" "scale_up_alarm" {
+  for_each            = var.vpcs
+  alarm_name          = "${each.value.name_prefix}-scale-up-alarm"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 9.0 # Scale up when CPU > 8%
+  alarm_description   = "Alarm to scale up when CPU utilization is above 9%"
+  alarm_actions       = [aws_autoscaling_policy.scale_up[each.key].arn]
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.web_app_asg[each.key].name
+  }
 }
+
+# CloudWatch Alarm for Scaling Down
+resource "aws_cloudwatch_metric_alarm" "scale_down_alarm" {
+  for_each            = var.vpcs
+  alarm_name          = "${each.value.name_prefix}-scale-down-alarm"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 7.0 # Scale down when CPU < 7%
+  alarm_description   = "Alarm to scale down when CPU utilization is below 7%"
+  alarm_actions       = [aws_autoscaling_policy.scale_down[each.key].arn]
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.web_app_asg[each.key].name
+  }
+}
+
