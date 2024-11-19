@@ -84,3 +84,18 @@ variable "key_name" {
   type        = string
   default     = "my-key-pair" # Replace with the name of your key pair
 }
+variable "lambda_zip_path" {
+  description = "Path to the Lambda function zip file"
+  type        = string
+}
+
+variable "email_server" {
+  description = "Email server configuration (e.g., Mailgun API key and domain)"
+  type        = map(string)
+}
+
+variable "sns_topic_name" {
+  description = "Name of the SNS topic"
+  type        = string
+  default     = "user_creation_topic"
+}

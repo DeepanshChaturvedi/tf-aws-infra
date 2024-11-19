@@ -198,6 +198,27 @@ resource "aws_iam_policy" "combined_policy" {
   })
 }
 
+resource "aws_iam_policy" "ec2_sns_publish_policy" {
+  name        = "ec2_sns_publish_policy"
+  description = "Policy for EC2 instances to publish messages to SNS"
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow",
+        Action   = "sns:Publish",
+        Resource = aws_sns_topic.user_creation_topic.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ec2_sns_publish_policy_attachment" {
+  role       = aws_iam_role.combined_ec2_role.name
+  policy_arn = aws_iam_policy.ec2_sns_publish_policy.arn
+}
+
+
 # Attach the combined policy to the IAM role
 resource "aws_iam_role_policy_attachment" "combined_policy_attachment" {
   role       = aws_iam_role.combined_ec2_role.name
@@ -410,6 +431,7 @@ DB_CONN_STRING="postgres:"
 S3_BUCKET_NAME="${aws_s3_bucket.attachments_bucket.bucket}"
 AWS_REGION="${var.default_region}"
 APP_DOMAIN="${var.subdomain}.${var.domain}"
+SNS_TOPIC_ARN="${aws_sns_topic.user_creation_topic.arn}"
 
 # Create .env file for application
 sudo bash -c 'cat <<EOT > /opt/webapp/.env
@@ -422,6 +444,7 @@ DB_CONN_STRING="postgres:"
 S3_BUCKET_NAME="${aws_s3_bucket.attachments_bucket.bucket}"
 AWS_REGION="${var.default_region}"
 APP_DOMAIN="${var.subdomain}.${var.domain}"
+SNS_TOPIC_ARN="${aws_sns_topic.user_creation_topic.arn}"
 EOT'
 
 sudo bash -c 'cat <<EOT > /etc/systemd/system/nodeapp.service
@@ -601,5 +624,98 @@ resource "aws_cloudwatch_metric_alarm" "scale_down_alarm" {
   dimensions = {
     AutoScalingGroupName = aws_autoscaling_group.web_app_asg[each.key].name
   }
+}
+
+resource "aws_sns_topic" "user_creation_topic" {
+  name = var.sns_topic_name
+}
+resource "aws_iam_role" "lambda_execution_role" {
+  name = "lambda_execution_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect    = "Allow",
+      Principal = { Service = "lambda.amazonaws.com" },
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_policy" "lambda_policy" {
+  name        = "lambda_policy"
+  description = "Policy for Lambda to access SNS and CloudWatch"
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "sns:Publish",
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_policy_attachment" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = aws_iam_policy.lambda_policy.arn
+}
+
+resource "aws_lambda_function" "email_verification_lambda" {
+  for_each         = aws_db_instance.csye6225_rds
+  function_name    = "email_verification_lambda_${each.key}"
+  filename         = var.lambda_zip_path
+  handler          = "index.handler"
+  runtime          = "nodejs18.x"
+  role             = aws_iam_role.lambda_execution_role.arn
+  source_code_hash = filebase64sha256(var.lambda_zip_path)
+
+  environment {
+    variables = {
+      MAILGUN_API_KEY = var.email_server["api_key"]
+      MAILGUN_DOMAIN  = var.email_server["domain"]
+      APP_DOMAIN      = "${var.subdomain}.${var.domain}"
+      DB_NAME         = "csye6225"
+      DB_CONN_STRING  = "${each.value.endpoint}"
+      DB_USERNAME     = "csye6225"
+      DB_PASSWORD     = "${var.db_password}"
+    }
+  }
+
+  tags = {
+    Name = "email_verification_lambda"
+  }
+}
+
+resource "aws_sns_topic_subscription" "lambda_subscription" {
+  for_each  = aws_lambda_function.email_verification_lambda
+  topic_arn = aws_sns_topic.user_creation_topic.arn
+  protocol  = "lambda"
+  endpoint  = each.value.arn
+}
+
+resource "aws_lambda_permission" "allow_sns_invoke" {
+  for_each      = aws_lambda_function.email_verification_lambda
+  statement_id  = "AllowSNSInvoke-${each.key}"
+  action        = "lambda:InvokeFunction"
+  function_name = each.value.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.user_creation_topic.arn
+}
+
+output "sns_topic_arn" {
+  value       = aws_sns_topic.user_creation_topic.arn
+  description = "ARN of the SNS topic"
+}
+
+output "lambda_function_arns" {
+  value       = [for lambda in aws_lambda_function.email_verification_lambda : lambda.arn]
+  description = "List of ARNs for all Lambda functions"
 }
 
